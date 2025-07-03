@@ -2,17 +2,27 @@ import requests
 import unittest
 import sys
 import os
+import uuid
+import random
+from datetime import datetime
 
 class PokerLeagueAPITester:
     def __init__(self, base_url):
         self.base_url = base_url
         self.tests_run = 0
         self.tests_passed = 0
+        self.token = None
+        self.user = None
+        self.test_users = []
+        self.test_league = None
 
-    def run_test(self, name, method, endpoint, expected_status, data=None):
+    def run_test(self, name, method, endpoint, expected_status, data=None, auth=False):
         """Run a single API test"""
         url = f"{self.base_url}/{endpoint}"
         headers = {'Content-Type': 'application/json'}
+        
+        if auth and self.token:
+            headers['Authorization'] = f'Bearer {self.token}'
         
         self.tests_run += 1
         print(f"\n🔍 Testing {name}...")
@@ -27,152 +37,449 @@ class PokerLeagueAPITester:
             if success:
                 self.tests_passed += 1
                 print(f"✅ Passed - Status: {response.status_code}")
-                return success, response.json()
+                try:
+                    return success, response.json()
+                except:
+                    return success, {}
             else:
                 print(f"❌ Failed - Expected {expected_status}, got {response.status_code}")
+                try:
+                    error_data = response.json()
+                    print(f"Error details: {error_data}")
+                except:
+                    print(f"Response text: {response.text}")
                 return success, {}
 
         except Exception as e:
             print(f"❌ Failed - Error: {str(e)}")
             return False, {}
 
-    def test_get_players(self):
-        """Test getting the list of players"""
+    # Authentication Tests
+    def test_register_user(self, email=None, password="Test123!", name=None):
+        """Test user registration"""
+        if not email:
+            email = f"test{uuid.uuid4().hex[:8]}@example.com"
+        if not name:
+            name = f"Test User {uuid.uuid4().hex[:5]}"
+            
+        data = {
+            "email": email,
+            "password": password,
+            "name": name
+        }
+        
         success, response = self.run_test(
-            "Get Players",
-            "GET",
-            "api/players",
-            200
+            "Register User",
+            "POST",
+            "api/auth/register",
+            200,
+            data=data
         )
+        
         if success:
-            print(f"Retrieved {len(response)} players")
-            if len(response) == 15:
-                print("✅ Correct number of players (15)")
-            else:
-                print(f"❌ Expected 15 players, got {len(response)}")
-        return success
+            print(f"Registered user: {response.get('user', {}).get('name')}")
+            self.token = response.get('access_token')
+            self.user = response.get('user')
+            return success, self.user
+        return success, None
 
-    def test_get_game_status(self):
-        """Test getting the current game status"""
+    def test_login_user(self, email, password="Test123!"):
+        """Test user login"""
+        data = {
+            "email": email,
+            "password": password
+        }
+        
+        success, response = self.run_test(
+            "Login User",
+            "POST",
+            "api/auth/login",
+            200,
+            data=data
+        )
+        
+        if success:
+            print(f"Logged in user: {response.get('user', {}).get('name')}")
+            self.token = response.get('access_token')
+            self.user = response.get('user')
+            return success, self.user
+        return success, None
+
+    def test_get_current_user(self):
+        """Test getting current user info"""
+        success, response = self.run_test(
+            "Get Current User",
+            "GET",
+            "api/auth/me",
+            200,
+            auth=True
+        )
+        
+        if success:
+            print(f"Current user: {response.get('name')}")
+        return success, response
+
+    # League Tests
+    def test_create_league(self, name=None, buy_in=50, max_players=18):
+        """Test creating a league"""
+        if not name:
+            name = f"Test League {uuid.uuid4().hex[:5]}"
+            
+        data = {
+            "name": name,
+            "buy_in": buy_in,
+            "max_players": max_players,
+            "game_format": "tournament",
+            "description": "Test league for API testing"
+        }
+        
+        success, response = self.run_test(
+            "Create League",
+            "POST",
+            "api/leagues",
+            200,
+            data=data,
+            auth=True
+        )
+        
+        if success:
+            print(f"Created league: {name} with ID: {response.get('league_id')}")
+            return success, response.get('league_id')
+        return success, None
+
+    def test_get_leagues(self):
+        """Test getting all leagues"""
+        success, response = self.run_test(
+            "Get All Leagues",
+            "GET",
+            "api/leagues",
+            200,
+            auth=True
+        )
+        
+        if success:
+            print(f"Retrieved {len(response)} leagues")
+        return success, response
+
+    def test_get_my_leagues(self):
+        """Test getting user's leagues"""
+        success, response = self.run_test(
+            "Get My Leagues",
+            "GET",
+            "api/leagues/my",
+            200,
+            auth=True
+        )
+        
+        if success:
+            print(f"Retrieved {len(response)} of my leagues")
+        return success, response
+
+    def test_join_league(self, league_id):
+        """Test joining a league"""
+        data = {
+            "league_id": league_id
+        }
+        
+        success, response = self.run_test(
+            "Join League",
+            "POST",
+            "api/leagues/join",
+            200,
+            data=data,
+            auth=True
+        )
+        
+        if success:
+            print(f"Joined league: {response.get('message')}")
+        return success, response
+
+    # Game Tests
+    def test_get_game_status(self, league_id):
+        """Test getting game status for a league"""
         success, response = self.run_test(
             "Get Game Status",
             "GET",
-            "api/game/status",
-            200
+            f"api/game/{league_id}/status",
+            200,
+            auth=True
         )
+        
         if success:
-            print(f"Game status: {len(response.get('seat_assignments', []))} players checked in")
+            print(f"Game status: {response.get('checked_in_players', 0)} players checked in")
             print(f"Tables needed: {response.get('tables_needed', 0)}")
         return success, response
 
-    def test_player_checkin(self, player_id):
+    def test_player_checkin(self, league_id, action="check_in"):
         """Test checking in a player"""
+        data = {
+            "league_id": league_id,
+            "action": action
+        }
+        
         success, response = self.run_test(
-            f"Check In Player {player_id}",
+            f"Player {action}",
             "POST",
-            "api/game/checkin",
+            f"api/game/{league_id}/checkin",
             200,
-            data={"player_id": player_id, "action": "check_in"}
+            data=data,
+            auth=True
         )
+        
         if success:
-            print(f"Player checked in: {response.get('message', '')}")
+            print(f"Player {action}: {response.get('message', '')}")
             print(f"Total checked in: {response.get('checked_in_count', 0)}")
-        return success
+        return success, response
 
-    def test_player_checkout(self, player_id):
-        """Test checking out a player"""
-        success, response = self.run_test(
-            f"Check Out Player {player_id}",
-            "POST",
-            "api/game/checkin",
-            200,
-            data={"player_id": player_id, "action": "check_out"}
-        )
-        if success:
-            print(f"Player checked out: {response.get('message', '')}")
-            print(f"Total checked in: {response.get('checked_in_count', 0)}")
-        return success
-
-    def test_start_game(self):
-        """Test starting the game"""
+    def test_start_game(self, league_id):
+        """Test starting a game"""
         success, response = self.run_test(
             "Start Game",
             "POST",
-            "api/game/start",
+            f"api/game/{league_id}/start",
             200,
-            data={}
+            auth=True
         )
+        
         if success:
             print(f"Game started: {response.get('message', '')}")
-        return success
+        return success, response
 
-    def test_reset_game(self):
-        """Test resetting the game"""
+    def test_complete_game(self, league_id, results):
+        """Test completing a game with results"""
+        data = {
+            "results": results
+        }
+        
+        success, response = self.run_test(
+            "Complete Game",
+            "POST",
+            f"api/game/{league_id}/complete",
+            200,
+            data=data,
+            auth=True
+        )
+        
+        if success:
+            print(f"Game completed: {response.get('message', '')}")
+            print(f"Total players: {response.get('total_players', 0)}")
+            print(f"Prize pool: ${response.get('prize_pool', 0)}")
+        return success, response
+
+    def test_reset_game(self, league_id):
+        """Test resetting a game"""
         success, response = self.run_test(
             "Reset Game",
             "POST",
-            "api/game/reset",
+            f"api/game/{league_id}/reset",
             200,
-            data={}
+            auth=True
         )
+        
         if success:
             print(f"Game reset: {response.get('message', '')}")
-        return success
+        return success, response
 
-    def test_seat_assignment_algorithm(self):
-        """Test the seat assignment algorithm with different player counts"""
-        print("\n🔍 Testing Seat Assignment Algorithm...")
+    # Leaderboard Tests
+    def test_get_overall_leaderboard(self):
+        """Test getting the overall leaderboard"""
+        success, response = self.run_test(
+            "Get Overall Leaderboard",
+            "GET",
+            "api/leaderboard",
+            200,
+            auth=True
+        )
         
-        # Reset game first
-        self.test_reset_game()
+        if success:
+            print(f"Retrieved leaderboard with {len(response)} entries")
+            if len(response) > 0:
+                top_player = response[0]
+                print(f"Top player: {top_player.get('user_name')} with {top_player.get('total_points')} points")
+        return success, response
+
+    def test_get_league_leaderboard(self, league_id):
+        """Test getting a league-specific leaderboard"""
+        success, response = self.run_test(
+            "Get League Leaderboard",
+            "GET",
+            f"api/leaderboard/league/{league_id}",
+            200,
+            auth=True
+        )
         
-        # Test with 1-9 players (should be 1 table)
-        print("\n--- Testing with 1-9 players (should be 1 table) ---")
-        for i in range(1, 10):
-            self.test_player_checkin(f"player{i}")
-            _, status = self.test_get_game_status()
-            tables_needed = status.get('tables_needed', 0)
-            if tables_needed == 1:
-                print(f"✅ With {i} players: {tables_needed} table needed (correct)")
-            else:
-                print(f"❌ With {i} players: {tables_needed} tables needed (expected 1)")
+        if success:
+            print(f"Retrieved league leaderboard with {len(response)} entries")
+        return success, response
+
+    def test_get_user_stats(self, user_id):
+        """Test getting user statistics"""
+        success, response = self.run_test(
+            "Get User Stats",
+            "GET",
+            f"api/stats/user/{user_id}",
+            200,
+            auth=True
+        )
         
-        # Test with 10+ players (should be multiple tables)
-        print("\n--- Testing with 10+ players (should be multiple tables) ---")
-        for i in range(10, 16):
-            self.test_player_checkin(f"player{i}")
-            _, status = self.test_get_game_status()
-            tables_needed = status.get('tables_needed', 0)
-            expected_tables = (i + 8) // 9  # Same formula as in the backend
-            if tables_needed == expected_tables:
-                print(f"✅ With {i} players: {tables_needed} tables needed (correct)")
-            else:
-                print(f"❌ With {i} players: {tables_needed} tables needed (expected {expected_tables})")
+        if success:
+            stats = response.get('stats', {})
+            print(f"User stats: {stats.get('total_games', 0)} games played")
+            print(f"Total points: {stats.get('total_points', 0)}")
+            print(f"Win rate: {stats.get('win_rate', 0)}%")
+            print(f"Total earnings: ${stats.get('total_earnings', 0)}")
+        return success, response
+
+    # Complete Flow Test
+    def test_complete_tournament_flow(self):
+        """Test the complete tournament flow from registration to leaderboard"""
+        print("\n=== TESTING COMPLETE TOURNAMENT FLOW ===")
         
-        # Check distribution across tables
-        _, status = self.test_get_game_status()
-        seat_assignments = status.get('seat_assignments', [])
+        # 1. Register admin user
+        admin_success, admin = self.test_register_user()
+        if not admin_success:
+            print("❌ Failed to register admin user")
+            return False
         
-        # Count players per table
-        table_counts = {}
-        for seat in seat_assignments:
-            table_num = seat.get('table_number')
-            if table_num not in table_counts:
-                table_counts[table_num] = 0
-            table_counts[table_num] += 1
+        admin_id = admin.get('id')
+        admin_email = admin.get('email')
         
-        # Check if distribution is even (max difference should be 1)
-        if table_counts:
-            min_players = min(table_counts.values())
-            max_players = max(table_counts.values())
-            if max_players - min_players <= 1:
-                print(f"✅ Even distribution across tables: {table_counts}")
-            else:
-                print(f"❌ Uneven distribution across tables: {table_counts}")
+        # 2. Create a league
+        league_success, league_id = self.test_create_league(buy_in=100)
+        if not league_success or not league_id:
+            print("❌ Failed to create league")
+            return False
         
-        # Reset game after testing
-        self.test_reset_game()
+        self.test_league = league_id
         
+        # 3. Register 5 more test users
+        test_users = []
+        for i in range(5):
+            # Save admin token
+            admin_token = self.token
+            
+            # Register new user
+            user_success, user = self.test_register_user()
+            if user_success and user:
+                test_users.append(user)
+                
+                # Join the league with this user
+                join_success, _ = self.test_join_league(league_id)
+                if not join_success:
+                    print(f"❌ Failed to join league for user {user.get('name')}")
+            
+            # Restore admin token
+            self.token = admin_token
+            self.user = admin
+        
+        self.test_users = test_users
+        
+        if len(test_users) < 3:
+            print("❌ Failed to create enough test users")
+            return False
+        
+        print(f"✅ Created {len(test_users)} test users who joined the league")
+        
+        # 4. Check-in all users (admin + test users)
+        for user in [admin] + test_users:
+            # Login as this user
+            login_success, _ = self.test_login_user(user.get('email'))
+            if login_success:
+                # Check in
+                checkin_success, _ = self.test_player_checkin(league_id)
+                if not checkin_success:
+                    print(f"❌ Failed to check in user {user.get('name')}")
+        
+        # 5. Login as admin and start the game
+        login_success, _ = self.test_login_user(admin_email)
+        if not login_success:
+            print("❌ Failed to log back in as admin")
+            return False
+        
+        # Get game status to verify check-ins
+        _, game_status = self.test_get_game_status(league_id)
+        checked_in = game_status.get('checked_in_players', 0)
+        print(f"✅ {checked_in} players checked in")
+        
+        # Start the game
+        start_success, _ = self.test_start_game(league_id)
+        if not start_success:
+            print("❌ Failed to start the game")
+            return False
+        
+        print("✅ Game started successfully")
+        
+        # 6. Complete the game with results
+        all_players = [admin] + test_users
+        # Shuffle players to randomize finish positions
+        random.shuffle(all_players)
+        
+        results = []
+        for i, player in enumerate(all_players):
+            results.append({
+                "user_id": player.get('id'),
+                "user_name": player.get('name'),
+                "finish_position": i + 1,
+                "points_earned": 0,  # Will be calculated by backend
+                "buy_in_paid": 100
+            })
+        
+        complete_success, _ = self.test_complete_game(league_id, results)
+        if not complete_success:
+            print("❌ Failed to complete the game")
+            return False
+        
+        print("✅ Game completed successfully with results")
+        
+        # 7. Check leaderboard
+        leaderboard_success, leaderboard = self.test_get_league_leaderboard(league_id)
+        if not leaderboard_success:
+            print("❌ Failed to get league leaderboard")
+            return False
+        
+        if len(leaderboard) != len(all_players):
+            print(f"❌ Expected {len(all_players)} players on leaderboard, got {len(leaderboard)}")
+        else:
+            print(f"✅ Leaderboard has correct number of players: {len(leaderboard)}")
+        
+        # 8. Check overall leaderboard
+        overall_success, _ = self.test_get_overall_leaderboard()
+        if not overall_success:
+            print("❌ Failed to get overall leaderboard")
+            return False
+        
+        # 9. Check user stats for winner
+        winner_id = results[0]["user_id"]
+        stats_success, stats = self.test_get_user_stats(winner_id)
+        if not stats_success:
+            print("❌ Failed to get user stats")
+            return False
+        
+        # Verify winner has correct stats
+        user_stats = stats.get('stats', {})
+        if user_stats.get('total_games', 0) != 1:
+            print(f"❌ Expected winner to have 1 game, got {user_stats.get('total_games', 0)}")
+        else:
+            print("✅ Winner has correct game count")
+        
+        if user_stats.get('total_wins', 0) != 1:
+            print(f"❌ Expected winner to have 1 win, got {user_stats.get('total_wins', 0)}")
+        else:
+            print("✅ Winner has correct win count")
+        
+        if user_stats.get('win_rate', 0) != 100.0:
+            print(f"❌ Expected winner to have 100% win rate, got {user_stats.get('win_rate', 0)}%")
+        else:
+            print("✅ Winner has correct win rate")
+        
+        # 10. Reset the game
+        reset_success, _ = self.test_reset_game(league_id)
+        if not reset_success:
+            print("❌ Failed to reset the game")
+            return False
+        
+        print("✅ Game reset successfully")
+        print("✅ Complete tournament flow test passed!")
         return True
 
 def main():
@@ -187,22 +494,20 @@ def main():
     # Run tests
     print("\n=== POKER LEAGUE API TESTS ===")
     
-    # Basic API tests
-    tester.test_get_players()
-    tester.test_get_game_status()
+    # Test complete tournament flow
+    tester.test_complete_tournament_flow()
     
-    # Player check-in/out tests
-    tester.test_player_checkin("player1")
-    tester.test_player_checkin("player2")
-    tester.test_player_checkout("player1")
+    # Test individual endpoints
+    print("\n=== TESTING INDIVIDUAL ENDPOINTS ===")
     
-    # Game control tests
-    tester.test_player_checkin("player1")  # Need at least 2 players to start
-    tester.test_start_game()
-    tester.test_reset_game()
-    
-    # Algorithm tests
-    tester.test_seat_assignment_algorithm()
+    # If we have a test user and league from the flow test, use them
+    if tester.user and tester.test_league:
+        # Test leaderboard endpoints
+        tester.test_get_overall_leaderboard()
+        tester.test_get_league_leaderboard(tester.test_league)
+        
+        # Test user stats
+        tester.test_get_user_stats(tester.user.get('id'))
     
     # Print results
     print(f"\n📊 Tests passed: {tester.tests_passed}/{tester.tests_run}")
