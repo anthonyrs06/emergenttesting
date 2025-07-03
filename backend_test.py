@@ -380,7 +380,15 @@ class PokerLeagueAPITester:
         
         print(f"✅ Created {len(test_users)} test users who joined the league")
         
-        # 4. Check-in all users (admin + test users)
+        # 4. First get game status to initialize the game
+        _, game_status = self.test_get_game_status(league_id)
+        if not game_status:
+            print("❌ Failed to get initial game status")
+            return False
+            
+        print("✅ Game initialized successfully")
+        
+        # 5. Check-in all users (admin + test users)
         for user in [admin] + test_users:
             # Login as this user
             login_success, _ = self.test_login_user(user.get('email'))
@@ -389,8 +397,10 @@ class PokerLeagueAPITester:
                 checkin_success, _ = self.test_player_checkin(league_id)
                 if not checkin_success:
                     print(f"❌ Failed to check in user {user.get('name')}")
+                else:
+                    print(f"✅ Checked in user {user.get('name')}")
         
-        # 5. Login as admin and start the game
+        # 6. Login as admin and start the game
         login_success, _ = self.test_login_user(admin_email)
         if not login_success:
             print("❌ Failed to log back in as admin")
@@ -409,7 +419,7 @@ class PokerLeagueAPITester:
         
         print("✅ Game started successfully")
         
-        # 6. Complete the game with results
+        # 7. Complete the game with results
         all_players = [admin] + test_users
         # Shuffle players to randomize finish positions
         random.shuffle(all_players)
@@ -431,7 +441,7 @@ class PokerLeagueAPITester:
         
         print("✅ Game completed successfully with results")
         
-        # 7. Check leaderboard
+        # 8. Check leaderboard
         leaderboard_success, leaderboard = self.test_get_league_leaderboard(league_id)
         if not leaderboard_success:
             print("❌ Failed to get league leaderboard")
@@ -442,13 +452,13 @@ class PokerLeagueAPITester:
         else:
             print(f"✅ Leaderboard has correct number of players: {len(leaderboard)}")
         
-        # 8. Check overall leaderboard
+        # 9. Check overall leaderboard
         overall_success, _ = self.test_get_overall_leaderboard()
         if not overall_success:
             print("❌ Failed to get overall leaderboard")
             return False
         
-        # 9. Check user stats for winner
+        # 10. Check user stats for winner
         winner_id = results[0]["user_id"]
         stats_success, stats = self.test_get_user_stats(winner_id)
         if not stats_success:
@@ -472,7 +482,7 @@ class PokerLeagueAPITester:
         else:
             print("✅ Winner has correct win rate")
         
-        # 10. Reset the game
+        # 11. Reset the game
         reset_success, _ = self.test_reset_game(league_id)
         if not reset_success:
             print("❌ Failed to reset the game")
