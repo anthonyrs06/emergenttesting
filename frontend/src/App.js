@@ -307,13 +307,25 @@ const Dashboard = () => {
         >
           🔍 Browse Leagues ({allLeagues.length})
         </button>
+        <button
+          className={`tab ${activeTab === 'leaderboard' ? 'active' : ''}`}
+          onClick={() => setActiveTab('leaderboard')}
+        >
+          📊 Leaderboard
+        </button>
+        <button
+          className={`tab ${activeTab === 'my-stats' ? 'active' : ''}`}
+          onClick={() => setActiveTab('my-stats')}
+        >
+          📈 My Stats
+        </button>
       </div>
 
       <div className="dashboard-content">
         {loading ? (
           <div className="loading">
             <div className="loading-spinner"></div>
-            <p>Loading leagues...</p>
+            <p>Loading...</p>
           </div>
         ) : (
           <>
@@ -331,6 +343,8 @@ const Dashboard = () => {
                 onJoinLeague={handleJoinLeague}
               />
             )}
+            {activeTab === 'leaderboard' && <Leaderboard />}
+            {activeTab === 'my-stats' && <MyStats />}
           </>
         )}
       </div>
@@ -399,6 +413,211 @@ const LeagueGrid = ({ leagues, isMyLeagues, onSelectLeague, onJoinLeague }) => {
           </div>
         </div>
       ))}
+    </div>
+  );
+};
+
+const Leaderboard = () => {
+  const [leaderboard, setLeaderboard] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const { token } = useAuth();
+
+  useEffect(() => {
+    fetchLeaderboard();
+  }, []);
+
+  const fetchLeaderboard = async () => {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/leaderboard`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setLeaderboard(data);
+      }
+    } catch (error) {
+      console.error('Error fetching leaderboard:', error);
+    }
+    setLoading(false);
+  };
+
+  if (loading) {
+    return (
+      <div className="loading">
+        <div className="loading-spinner"></div>
+        <p>Loading leaderboard...</p>
+      </div>
+    );
+  }
+
+  if (leaderboard.length === 0) {
+    return (
+      <div className="empty-state">
+        <div className="empty-icon">🏆</div>
+        <h3>No Games Played Yet</h3>
+        <p>Complete some tournament games to see the leaderboard</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="leaderboard-container">
+      <div className="leaderboard-header">
+        <h2>🏆 Overall Leaderboard</h2>
+        <p>Rankings across all leagues and tournaments</p>
+      </div>
+      
+      <div className="leaderboard-table">
+        <div className="table-header">
+          <div className="rank-col">Rank</div>
+          <div className="player-col">Player</div>
+          <div className="points-col">Points</div>
+          <div className="games-col">Games</div>
+          <div className="wins-col">Wins</div>
+          <div className="winrate-col">Win Rate</div>
+          <div className="earnings-col">Earnings</div>
+        </div>
+        
+        {leaderboard.map((entry, index) => (
+          <div key={entry.user_id} className={`table-row ${index < 3 ? 'top-three' : ''}`}>
+            <div className="rank-col">
+              <span className={`rank rank-${index + 1}`}>
+                {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${entry.rank}`}
+              </span>
+            </div>
+            <div className="player-col">
+              <span className="player-avatar">{entry.user_avatar}</span>
+              <span className="player-name">{entry.user_name}</span>
+            </div>
+            <div className="points-col">{entry.total_points}</div>
+            <div className="games-col">{entry.games_played}</div>
+            <div className="wins-col">{entry.wins}</div>
+            <div className="winrate-col">{entry.win_rate}%</div>
+            <div className="earnings-col">${entry.total_earnings}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const MyStats = () => {
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const { user, token } = useAuth();
+
+  useEffect(() => {
+    fetchStats();
+  }, []);
+
+  const fetchStats = async () => {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/stats/user/${user.id}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setStats(data);
+      }
+    } catch (error) {
+      console.error('Error fetching stats:', error);
+    }
+    setLoading(false);
+  };
+
+  if (loading) {
+    return (
+      <div className="loading">
+        <div className="loading-spinner"></div>
+        <p>Loading your stats...</p>
+      </div>
+    );
+  }
+
+  if (!stats || stats.stats.total_games === 0) {
+    return (
+      <div className="empty-state">
+        <div className="empty-icon">📈</div>
+        <h3>No Games Played Yet</h3>
+        <p>Join some tournaments to start building your poker stats!</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="stats-container">
+      <div className="stats-header">
+        <h2>📈 Your Poker Stats</h2>
+        <div className="player-info">
+          <span className="player-avatar-large">{user.avatar}</span>
+          <span className="player-name-large">{user.name}</span>
+        </div>
+      </div>
+      
+      <div className="stats-grid">
+        <div className="stat-card">
+          <div className="stat-icon">🏆</div>
+          <div className="stat-value">{stats.stats.total_points}</div>
+          <div className="stat-label">Total Points</div>
+        </div>
+        
+        <div className="stat-card">
+          <div className="stat-icon">🎮</div>
+          <div className="stat-value">{stats.stats.total_games}</div>
+          <div className="stat-label">Games Played</div>
+        </div>
+        
+        <div className="stat-card">
+          <div className="stat-icon">🥇</div>
+          <div className="stat-value">{stats.stats.total_wins}</div>
+          <div className="stat-label">Wins</div>
+        </div>
+        
+        <div className="stat-card">
+          <div className="stat-icon">📊</div>
+          <div className="stat-value">{stats.stats.win_rate}%</div>
+          <div className="stat-label">Win Rate</div>
+        </div>
+        
+        <div className="stat-card">
+          <div className="stat-icon">🎯</div>
+          <div className="stat-value">{stats.stats.avg_finish}</div>
+          <div className="stat-label">Avg Finish</div>
+        </div>
+        
+        <div className="stat-card">
+          <div className="stat-icon">💰</div>
+          <div className="stat-value">${stats.stats.total_earnings}</div>
+          <div className="stat-label">Total Earnings</div>
+        </div>
+      </div>
+      
+      {stats.recent_games.length > 0 && (
+        <div className="recent-games">
+          <h3>Recent Games</h3>
+          <div className="games-list">
+            {stats.recent_games.map((game, index) => (
+              <div key={game.game_id} className="game-item">
+                <div className="game-info">
+                  <div className="league-name">{game.league_name}</div>
+                  <div className="game-date">
+                    {new Date(game.created_at).toLocaleDateString()}
+                  </div>
+                </div>
+                <div className="game-result">
+                  <div className={`finish-position ${game.finish_position === 1 ? 'winner' : ''}`}>
+                    {game.finish_position === 1 ? '🥇' : `#${game.finish_position}`}
+                  </div>
+                  <div className="points-earned">+{game.points_earned} pts</div>
+                  <div className={`earnings ${game.earnings >= 0 ? 'positive' : 'negative'}`}>
+                    {game.earnings >= 0 ? '+' : ''}${game.earnings}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -521,11 +740,12 @@ const CreateLeagueModal = ({ onClose, onSuccess }) => {
   );
 };
 
-// Game Interface (updated to work with real users)
+// Game Interface (updated to work with real users and results submission)
 const GameInterface = ({ league, onBack }) => {
   const [gameStatus, setGameStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [checkedInUsers, setCheckedInUsers] = useState(new Set());
+  const [showResultsForm, setShowResultsForm] = useState(false);
   const { user, token } = useAuth();
 
   useEffect(() => {
@@ -692,6 +912,7 @@ const GameInterface = ({ league, onBack }) => {
                 <button
                   className={`my-checkin-btn ${isCheckedIn ? 'checked-in' : ''}`}
                   onClick={() => handleCheckIn(isCheckedIn ? 'check_out' : 'check_in')}
+                  disabled={gameStatus?.game_started}
                 >
                   {isCheckedIn ? '✓ Checked In' : 'Check In'}
                 </button>
@@ -719,10 +940,20 @@ const GameInterface = ({ league, onBack }) => {
               <button 
                 className="start-game-btn"
                 onClick={startGame}
-                disabled={!gameStatus || gameStatus.checked_in_players < 2}
+                disabled={!gameStatus || gameStatus.checked_in_players < 2 || gameStatus.game_started}
               >
                 {gameStatus?.game_started ? '🎮 Game Started' : '🚀 Start Game'}
               </button>
+              
+              {gameStatus?.game_started && !gameStatus?.game_completed && (
+                <button 
+                  className="complete-game-btn"
+                  onClick={() => setShowResultsForm(true)}
+                >
+                  🏁 Complete Game
+                </button>
+              )}
+              
               <button 
                 className="reset-game-btn"
                 onClick={resetGame}
@@ -759,6 +990,138 @@ const GameInterface = ({ league, onBack }) => {
             </div>
           )}
         </div>
+      </div>
+
+      {showResultsForm && (
+        <GameResultsModal 
+          gameStatus={gameStatus}
+          league={league}
+          onClose={() => setShowResultsForm(false)}
+          onSuccess={() => {
+            setShowResultsForm(false);
+            fetchGameStatus();
+          }}
+        />
+      )}
+    </div>
+  );
+};
+
+const GameResultsModal = ({ gameStatus, league, onClose, onSuccess }) => {
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const { token } = useAuth();
+
+  useEffect(() => {
+    // Initialize results with checked-in players
+    const initialResults = gameStatus.seat_assignments.map((assignment, index) => ({
+      user_id: assignment.user_id,
+      user_name: assignment.user_name,
+      finish_position: index + 1,
+      points_earned: 0,
+      buy_in_paid: league.buy_in
+    }));
+    setResults(initialResults);
+  }, [gameStatus, league]);
+
+  const handlePositionChange = (userIndex, newPosition) => {
+    const newResults = [...results];
+    const oldPosition = newResults[userIndex].finish_position;
+    
+    // Update the current player's position
+    newResults[userIndex].finish_position = newPosition;
+    
+    // Adjust other players' positions
+    newResults.forEach((result, index) => {
+      if (index !== userIndex) {
+        if (newPosition <= oldPosition) {
+          // Moving up - push others down
+          if (result.finish_position >= newPosition && result.finish_position < oldPosition) {
+            result.finish_position += 1;
+          }
+        } else {
+          // Moving down - pull others up
+          if (result.finish_position > oldPosition && result.finish_position <= newPosition) {
+            result.finish_position -= 1;
+          }
+        }
+      }
+    });
+    
+    // Sort by position and update points
+    newResults.sort((a, b) => a.finish_position - b.finish_position);
+    setResults(newResults);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/game/${league.id}/complete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ results })
+      });
+
+      if (response.ok) {
+        onSuccess();
+      } else {
+        const error = await response.json();
+        alert(error.detail);
+      }
+    } catch (error) {
+      console.error('Error submitting results:', error);
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal large-modal">
+        <div className="modal-header">
+          <h2>🏁 Game Results</h2>
+          <button onClick={onClose} className="close-button">✕</button>
+        </div>
+        
+        <form onSubmit={handleSubmit} className="results-form">
+          <p>Set the finish positions for each player:</p>
+          
+          <div className="results-list">
+            {results.map((result, index) => (
+              <div key={result.user_id} className="result-item">
+                <div className="player-info">
+                  <span className="player-name">{result.user_name}</span>
+                </div>
+                <div className="position-selector">
+                  <label>Finish Position:</label>
+                  <select
+                    value={result.finish_position}
+                    onChange={(e) => handlePositionChange(index, parseInt(e.target.value))}
+                  >
+                    {Array.from({length: results.length}, (_, i) => i + 1).map(pos => (
+                      <option key={pos} value={pos}>
+                        {pos === 1 ? '🥇 1st' : pos === 2 ? '🥈 2nd' : pos === 3 ? '🥉 3rd' : `${pos}th`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            ))}
+          </div>
+          
+          <div className="form-actions">
+            <button type="button" onClick={onClose} className="cancel-button">
+              Cancel
+            </button>
+            <button type="submit" disabled={loading} className="submit-button">
+              {loading ? 'Submitting...' : 'Complete Game'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
