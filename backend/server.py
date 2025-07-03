@@ -43,6 +43,7 @@ users_collection = db.users
 leagues_collection = db.leagues
 memberships_collection = db.memberships
 games_collection = db.games
+game_results_collection = db.game_results
 
 # Models
 class UserCreate(BaseModel):
@@ -87,12 +88,34 @@ class CheckInRequest(BaseModel):
     league_id: str
     action: str  # "check_in" or "check_out"
 
+class GameResult(BaseModel):
+    user_id: str
+    user_name: str
+    finish_position: int
+    points_earned: int
+    buy_in_paid: int
+
+class GameResultSubmission(BaseModel):
+    results: List[GameResult]
+
 class SeatAssignment(BaseModel):
     table_number: int
     seat_number: int
     user_id: str
     user_name: str
     user_avatar: str
+
+class LeaderboardEntry(BaseModel):
+    user_id: str
+    user_name: str
+    user_avatar: str
+    total_points: int
+    games_played: int
+    wins: int
+    win_rate: float
+    avg_finish: float
+    total_earnings: int
+    rank: int
 
 # JWT helper functions
 def create_access_token(user_id: str, email: str) -> str:
@@ -126,6 +149,45 @@ def hash_password(password: str) -> str:
 
 def verify_password(password: str, hashed: str) -> bool:
     return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+
+def calculate_tournament_points(finish_position: int, total_players: int) -> int:
+    """
+    Calculate points based on finish position in tournament
+    1st place gets 100 points, decreasing by position
+    """
+    if finish_position == 1:
+        return 100
+    elif finish_position == 2:
+        return 80
+    elif finish_position == 3:
+        return 60
+    elif finish_position <= 5:
+        return 40
+    elif finish_position <= 8:
+        return 20
+    else:
+        return 10
+
+def calculate_prize_distribution(total_players: int, buy_in: int) -> Dict[int, int]:
+    """
+    Calculate prize distribution based on number of players
+    Simple structure: 1st=50%, 2nd=30%, 3rd=20% of prize pool
+    """
+    prize_pool = total_players * buy_in
+    
+    if total_players < 3:
+        return {1: prize_pool}
+    elif total_players < 6:
+        return {
+            1: int(prize_pool * 0.7),
+            2: int(prize_pool * 0.3)
+        }
+    else:
+        return {
+            1: int(prize_pool * 0.5),
+            2: int(prize_pool * 0.3),
+            3: int(prize_pool * 0.2)
+        }
 
 def calculate_seat_assignments(checked_in_users: List[dict]) -> List[SeatAssignment]:
     """
@@ -170,6 +232,85 @@ def calculate_seat_assignments(checked_in_users: List[dict]) -> List[SeatAssignm
                 user_index += 1
     
     return assignments
+
+async def calculate_leaderboard(league_id: str = None) -> List[LeaderboardEntry]:
+    """
+    Calculate leaderboard for a specific league or overall
+    """
+    # Build query filter
+    query_filter = {}
+    if league_id:
+        query_filter["league_id"] = league_id
+    
+    # Aggregate player statistics
+    pipeline = [
+        {"$match": query_filter},
+        {
+            "$group": {
+                "_id": "$user_id",
+                "user_name": {"$first": "$user_name"},
+                "total_points": {"$sum": "$points_earned"},
+                "games_played": {"$sum": 1},
+                "wins": {
+                    "$sum": {
+                        "$cond": [{"$eq": ["$finish_position", 1]}, 1, 0]
+                    }
+                },
+                "total_finish_positions": {"$sum": "$finish_position"},
+                "total_earnings": {"$sum": "$earnings"}
+            }
+        },
+        {
+            "$project": {
+                "_id": 1,
+                "user_name": 1,
+                "total_points": 1,
+                "games_played": 1,
+                "wins": 1,
+                "win_rate": {
+                    "$cond": [
+                        {"$eq": ["$games_played", 0]},
+                        0,
+                        {"$divide": ["$wins", "$games_played"]}
+                    ]
+                },
+                "avg_finish": {
+                    "$cond": [
+                        {"$eq": ["$games_played", 0]},
+                        0,
+                        {"$divide": ["$total_finish_positions", "$games_played"]}
+                    ]
+                },
+                "total_earnings": 1
+            }
+        },
+        {"$sort": {"total_points": -1}}
+    ]
+    
+    leaderboard = []
+    rank = 1
+    
+    async for result in game_results_collection.aggregate(pipeline):
+        # Get user avatar
+        user = await users_collection.find_one({"id": result["_id"]})
+        user_avatar = user["avatar"] if user else "🎯"
+        
+        entry = LeaderboardEntry(
+            user_id=result["_id"],
+            user_name=result["user_name"],
+            user_avatar=user_avatar,
+            total_points=result["total_points"],
+            games_played=result["games_played"],
+            wins=result["wins"],
+            win_rate=round(result["win_rate"] * 100, 1),
+            avg_finish=round(result["avg_finish"], 1),
+            total_earnings=result["total_earnings"],
+            rank=rank
+        )
+        leaderboard.append(entry)
+        rank += 1
+    
+    return leaderboard
 
 # Auth endpoints
 @app.post("/api/auth/register")
@@ -429,6 +570,7 @@ async def get_game_status(league_id: str, current_user: dict = Depends(get_curre
         "total_members": len(league_members),
         "seat_assignments": assignments,
         "game_started": current_game["game_started"],
+        "game_completed": current_game.get("game_completed", False),
         "tables_needed": max(1, (len(current_game["checked_in_users"]) + 8) // 9)
     }
 
@@ -503,6 +645,61 @@ async def start_game(league_id: str, current_user: dict = Depends(get_current_us
         "game_id": current_game["id"]
     }
 
+@app.post("/api/game/{league_id}/complete")
+async def complete_game(league_id: str, submission: GameResultSubmission, current_user: dict = Depends(get_current_user)):
+    # Check if user is admin of this league
+    league = await leagues_collection.find_one({"id": league_id})
+    if not league or league["admin_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Only league admin can complete games")
+    
+    # Get current game
+    current_game = await games_collection.find_one({
+        "league_id": league_id,
+        "status": "active"
+    })
+    if not current_game:
+        raise HTTPException(status_code=404, detail="No active game found")
+    
+    if not current_game.get("game_started", False):
+        raise HTTPException(status_code=400, detail="Game must be started before completing")
+    
+    # Calculate prize distribution
+    total_players = len(submission.results)
+    prize_distribution = calculate_prize_distribution(total_players, league["buy_in"])
+    
+    # Save game results
+    for result in submission.results:
+        # Calculate points and earnings
+        points = calculate_tournament_points(result.finish_position, total_players)
+        earnings = prize_distribution.get(result.finish_position, 0) - league["buy_in"]
+        
+        game_result = {
+            "id": str(uuid.uuid4()),
+            "game_id": current_game["id"],
+            "league_id": league_id,
+            "user_id": result.user_id,
+            "user_name": result.user_name,
+            "finish_position": result.finish_position,
+            "points_earned": points,
+            "buy_in_paid": league["buy_in"],
+            "earnings": earnings,
+            "created_at": datetime.utcnow()
+        }
+        await game_results_collection.insert_one(game_result)
+    
+    # Mark game as completed
+    await games_collection.update_one(
+        {"id": current_game["id"]},
+        {"$set": {"game_completed": True, "completed_at": datetime.utcnow()}}
+    )
+    
+    return {
+        "success": True,
+        "message": "Game completed and results saved!",
+        "total_players": total_players,
+        "prize_pool": total_players * league["buy_in"]
+    }
+
 @app.post("/api/game/{league_id}/reset")
 async def reset_game(league_id: str, current_user: dict = Depends(get_current_user)):
     # Check if user is admin of this league
@@ -533,6 +730,96 @@ async def reset_game(league_id: str, current_user: dict = Depends(get_current_us
         "success": True,
         "message": "Game reset successfully",
         "game_id": game_id
+    }
+
+# Leaderboard endpoints
+@app.get("/api/leaderboard")
+async def get_overall_leaderboard(current_user: dict = Depends(get_current_user)):
+    """Get overall leaderboard across all leagues"""
+    leaderboard = await calculate_leaderboard()
+    return leaderboard
+
+@app.get("/api/leaderboard/league/{league_id}")
+async def get_league_leaderboard(league_id: str, current_user: dict = Depends(get_current_user)):
+    """Get leaderboard for a specific league"""
+    # Check if user is member of this league
+    membership = await memberships_collection.find_one({
+        "league_id": league_id,
+        "user_id": current_user["id"],
+        "status": "approved"
+    })
+    if not membership:
+        raise HTTPException(status_code=403, detail="Not a member of this league")
+    
+    leaderboard = await calculate_leaderboard(league_id)
+    return leaderboard
+
+@app.get("/api/stats/user/{user_id}")
+async def get_user_stats(user_id: str, current_user: dict = Depends(get_current_user)):
+    """Get detailed stats for a specific user"""
+    # Get user info
+    user = await users_collection.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Calculate user statistics
+    pipeline = [
+        {"$match": {"user_id": user_id}},
+        {
+            "$group": {
+                "_id": None,
+                "total_points": {"$sum": "$points_earned"},
+                "total_games": {"$sum": 1},
+                "total_wins": {
+                    "$sum": {"$cond": [{"$eq": ["$finish_position", 1]}, 1, 0]}
+                },
+                "total_earnings": {"$sum": "$earnings"},
+                "avg_finish": {"$avg": "$finish_position"},
+                "best_finish": {"$min": "$finish_position"}
+            }
+        }
+    ]
+    
+    stats_result = await game_results_collection.aggregate(pipeline).to_list(1)
+    
+    if not stats_result:
+        stats = {
+            "total_points": 0,
+            "total_games": 0,
+            "total_wins": 0,
+            "total_earnings": 0,
+            "avg_finish": 0,
+            "best_finish": 0,
+            "win_rate": 0
+        }
+    else:
+        stats = stats_result[0]
+        stats["win_rate"] = (stats["total_wins"] / stats["total_games"]) * 100 if stats["total_games"] > 0 else 0
+        stats["avg_finish"] = round(stats["avg_finish"], 1) if stats["avg_finish"] else 0
+        stats["win_rate"] = round(stats["win_rate"], 1)
+    
+    # Get recent games
+    recent_games = []
+    async for result in game_results_collection.find({"user_id": user_id}).sort("created_at", -1).limit(10):
+        # Get league info
+        league = await leagues_collection.find_one({"id": result["league_id"]})
+        recent_games.append({
+            "game_id": result["game_id"],
+            "league_name": league["name"] if league else "Unknown League",
+            "finish_position": result["finish_position"],
+            "points_earned": result["points_earned"],
+            "earnings": result["earnings"],
+            "created_at": result["created_at"]
+        })
+    
+    return {
+        "user": {
+            "id": user["id"],
+            "name": user["name"],
+            "avatar": user["avatar"]
+        },
+        "stats": stats,
+        "recent_games": recent_games
     }
 
 if __name__ == "__main__":
