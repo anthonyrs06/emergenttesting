@@ -87,6 +87,7 @@ class JoinLeagueRequest(BaseModel):
 class CheckInRequest(BaseModel):
     league_id: str
     action: str  # "check_in" or "check_out"
+    finish_position: Optional[int] = None  # For when checking out with score
 
 class GameResult(BaseModel):
     user_id: str
@@ -116,6 +117,14 @@ class LeaderboardEntry(BaseModel):
     avg_finish: float
     total_earnings: int
     rank: int
+
+class LiveElimination(BaseModel):
+    user_id: str
+    user_name: str
+    user_avatar: str
+    finish_position: int
+    points_earned: int
+    eliminated_at: datetime
 
 # JWT helper functions
 def create_access_token(user_id: str, email: str) -> str:
@@ -311,6 +320,18 @@ async def calculate_leaderboard(league_id: str = None) -> List[LeaderboardEntry]
         rank += 1
     
     return leaderboard
+
+async def get_active_game_players_count(league_id: str) -> int:
+    """Get the number of players who started the game (for calculating total players)"""
+    current_game = await games_collection.find_one({
+        "league_id": league_id,
+        "status": "active"
+    })
+    
+    if not current_game or not current_game.get("game_started", False):
+        return 0
+    
+    return len(current_game.get("initial_players", []))
 
 # Auth endpoints
 @app.post("/api/auth/register")
@@ -539,6 +560,8 @@ async def get_game_status(league_id: str, current_user: dict = Depends(get_curre
             "league_id": league_id,
             "status": "active",
             "checked_in_users": [],
+            "eliminated_users": [],
+            "initial_players": [],
             "seat_assignments": [],
             "game_started": False,
             "created_at": datetime.utcnow()
@@ -557,21 +580,42 @@ async def get_game_status(league_id: str, current_user: dict = Depends(get_curre
             "avatar": membership["user_avatar"]
         })
     
-    # Calculate current seat assignments
-    checked_in_users = [user for user in league_members if user["id"] in current_game["checked_in_users"]]
-    assignments = calculate_seat_assignments(checked_in_users)
+    # Get still-active players (checked in but not eliminated)
+    active_user_ids = [uid for uid in current_game["checked_in_users"] 
+                      if uid not in current_game.get("eliminated_users", [])]
+    active_users = [user for user in league_members if user["id"] in active_user_ids]
+    
+    # Calculate current seat assignments for active players only
+    assignments = calculate_seat_assignments(active_users)
+    
+    # Get live eliminations
+    eliminations = []
+    async for result in game_results_collection.find({
+        "game_id": current_game["id"]
+    }).sort("finish_position", 1):
+        eliminations.append({
+            "user_id": result["user_id"],
+            "user_name": result["user_name"],
+            "user_avatar": result.get("user_avatar", "🎯"),
+            "finish_position": result["finish_position"],
+            "points_earned": result["points_earned"],
+            "eliminated_at": result["created_at"]
+        })
     
     return {
         "game_id": current_game["id"],
         "league_id": league_id,
         "league_name": league["name"],
         "league_members": league_members,
-        "checked_in_players": len(current_game["checked_in_users"]),
+        "checked_in_players": len(active_user_ids),
         "total_members": len(league_members),
+        "total_initial_players": len(current_game.get("initial_players", [])),
+        "eliminated_count": len(current_game.get("eliminated_users", [])),
         "seat_assignments": assignments,
         "game_started": current_game["game_started"],
         "game_completed": current_game.get("game_completed", False),
-        "tables_needed": max(1, (len(current_game["checked_in_users"]) + 8) // 9)
+        "tables_needed": max(1, (len(active_user_ids) + 8) // 9),
+        "live_eliminations": eliminations
     }
 
 @app.post("/api/game/{league_id}/checkin")
@@ -593,26 +637,83 @@ async def handle_checkin(league_id: str, request: CheckInRequest, current_user: 
     if not current_game:
         raise HTTPException(status_code=404, detail="No active game found")
     
+    # Get league info for buy-in
+    league = await leagues_collection.find_one({"id": league_id})
+    
     # Update check-in status
     checked_in_users = current_game.get("checked_in_users", [])
+    eliminated_users = current_game.get("eliminated_users", [])
     
     if request.action == "check_in":
         if current_user["id"] not in checked_in_users:
             checked_in_users.append(current_user["id"])
+    
     elif request.action == "check_out":
-        if current_user["id"] in checked_in_users:
-            checked_in_users.remove(current_user["id"])
+        if current_game.get("game_started", False) and request.finish_position:
+            # Check out with score during active game (elimination)
+            if current_user["id"] in checked_in_users and current_user["id"] not in eliminated_users:
+                eliminated_users.append(current_user["id"])
+                
+                # Get total players count
+                total_players = len(current_game.get("initial_players", []))
+                
+                # Calculate points and earnings
+                points = calculate_tournament_points(request.finish_position, total_players)
+                prize_distribution = calculate_prize_distribution(total_players, league["buy_in"])
+                earnings = prize_distribution.get(request.finish_position, 0) - league["buy_in"]
+                
+                # Save game result immediately
+                game_result = {
+                    "id": str(uuid.uuid4()),
+                    "game_id": current_game["id"],
+                    "league_id": league_id,
+                    "user_id": current_user["id"],
+                    "user_name": current_user["name"],
+                    "user_avatar": current_user["avatar"],
+                    "finish_position": request.finish_position,
+                    "points_earned": points,
+                    "buy_in_paid": league["buy_in"],
+                    "earnings": earnings,
+                    "created_at": datetime.utcnow()
+                }
+                await game_results_collection.insert_one(game_result)
+                
+                # Update game in database
+                await games_collection.update_one(
+                    {"id": current_game["id"]},
+                    {"$set": {
+                        "checked_in_users": checked_in_users,
+                        "eliminated_users": eliminated_users
+                    }}
+                )
+                
+                return {
+                    "success": True,
+                    "message": f"Eliminated in position #{request.finish_position}",
+                    "checked_in_count": len([uid for uid in checked_in_users if uid not in eliminated_users]),
+                    "points_earned": points,
+                    "earnings": earnings
+                }
+        else:
+            # Regular check out (before game starts)
+            if current_user["id"] in checked_in_users:
+                checked_in_users.remove(current_user["id"])
     
     # Update game in database
     await games_collection.update_one(
         {"id": current_game["id"]},
-        {"$set": {"checked_in_users": checked_in_users}}
+        {"$set": {
+            "checked_in_users": checked_in_users,
+            "eliminated_users": eliminated_users
+        }}
     )
+    
+    active_players = len([uid for uid in checked_in_users if uid not in eliminated_users])
     
     return {
         "success": True,
         "message": f"Successfully {request.action.replace('_', ' ')}ed",
-        "checked_in_count": len(checked_in_users)
+        "checked_in_count": active_players
     }
 
 @app.post("/api/game/{league_id}/start")
@@ -633,16 +734,24 @@ async def start_game(league_id: str, current_user: dict = Depends(get_current_us
     if len(current_game.get("checked_in_users", [])) < 2:
         raise HTTPException(status_code=400, detail="Need at least 2 players to start")
     
+    # Save initial players list for calculating points later
+    initial_players = current_game.get("checked_in_users", []).copy()
+    
     # Start game
     await games_collection.update_one(
         {"id": current_game["id"]},
-        {"$set": {"game_started": True, "started_at": datetime.utcnow()}}
+        {"$set": {
+            "game_started": True,
+            "initial_players": initial_players,
+            "started_at": datetime.utcnow()
+        }}
     )
     
     return {
         "success": True,
         "message": "Game started!",
-        "game_id": current_game["id"]
+        "game_id": current_game["id"],
+        "total_players": len(initial_players)
     }
 
 @app.post("/api/game/{league_id}/complete")
@@ -667,7 +776,11 @@ async def complete_game(league_id: str, submission: GameResultSubmission, curren
     total_players = len(submission.results)
     prize_distribution = calculate_prize_distribution(total_players, league["buy_in"])
     
-    # Save game results
+    # Save game results (this might override live results, but gives admin final control)
+    # First, delete any existing results for this game
+    await game_results_collection.delete_many({"game_id": current_game["id"]})
+    
+    # Save new results
     for result in submission.results:
         # Calculate points and earnings
         points = calculate_tournament_points(result.finish_position, total_players)
@@ -679,6 +792,7 @@ async def complete_game(league_id: str, submission: GameResultSubmission, curren
             "league_id": league_id,
             "user_id": result.user_id,
             "user_name": result.user_name,
+            "user_avatar": result.user_avatar if hasattr(result, 'user_avatar') else "🎯",
             "finish_position": result.finish_position,
             "points_earned": points,
             "buy_in_paid": league["buy_in"],
@@ -720,6 +834,8 @@ async def reset_game(league_id: str, current_user: dict = Depends(get_current_us
         "league_id": league_id,
         "status": "active",
         "checked_in_users": [],
+        "eliminated_users": [],
+        "initial_players": [],
         "seat_assignments": [],
         "game_started": False,
         "created_at": datetime.utcnow()
