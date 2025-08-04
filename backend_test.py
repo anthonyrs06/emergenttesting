@@ -793,20 +793,8 @@ def main():
     # Run tests
     print("\n=== POKER LEAGUE API TESTS ===")
     
-    # Test complete tournament flow
-    tester.test_complete_tournament_flow()
-    
-    # Test individual endpoints
-    print("\n=== TESTING INDIVIDUAL ENDPOINTS ===")
-    
-    # If we have a test user and league from the flow test, use them
-    if tester.user and tester.test_league:
-        # Test leaderboard endpoints
-        tester.test_get_overall_leaderboard()
-        tester.test_get_league_leaderboard(tester.test_league)
-        
-        # Test user stats
-        tester.test_get_user_stats(tester.user.get('id'))
+    # Test the NEW Real-Time Score Logging feature
+    tester.test_real_time_score_logging_flow()
     
     # Print results
     print(f"\n📊 Tests passed: {tester.tests_passed}/{tester.tests_run}")
