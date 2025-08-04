@@ -1255,6 +1255,149 @@ body {
   color: #ef4444;
 }
 
+/* Score Logging Modal */
+.score-info {
+  text-align: center;
+  margin-bottom: 25px;
+  padding: 20px;
+  background: rgba(16, 185, 129, 0.1);
+  border-radius: 12px;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.score-info p {
+  color: #e2e8f0;
+  margin-bottom: 10px;
+}
+
+.score-info p:first-child {
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: #10b981;
+}
+
+.score-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.position-select {
+  background: rgba(71, 85, 105, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 8px;
+  padding: 12px 16px;
+  color: #f8fafc;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  width: 100%;
+}
+
+.position-select:focus {
+  outline: none;
+  border-color: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+}
+
+/* Elimination Status */
+.my-status.eliminated {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: #ef4444;
+}
+
+.eliminated-badge {
+  background: rgba(239, 68, 68, 0.8);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-weight: bold;
+  font-size: 0.9rem;
+}
+
+/* Eliminations List */
+.eliminations-list {
+  margin-top: 25px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.eliminations-list h3 {
+  color: #ef4444;
+  font-size: 1rem;
+  margin-bottom: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.elimination-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  background: rgba(239, 68, 68, 0.1);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.elimination-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.elimination-avatar {
+  font-size: 1.2rem;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(239, 68, 68, 0.2);
+  border-radius: 50%;
+  border: 1px solid rgba(239, 68, 68, 0.5);
+}
+
+.elimination-name {
+  color: #e2e8f0;
+  font-weight: 500;
+}
+
+.elimination-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.finish-pos {
+  font-weight: bold;
+  font-size: 1.1rem;
+  color: #94a3b8;
+  min-width: 45px;
+  text-align: center;
+}
+
+.finish-pos.top-three {
+  color: #fbbf24;
+  font-size: 1.3rem;
+}
+
+.points {
+  color: #10b981;
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+/* Tournament Info */
+.tournament-info {
+  color: #94a3b8;
+  font-size: 1.1rem;
+  font-weight: 500;
+}
+
 /* Game Results Modal */
 .large-modal {
   max-width: 600px;
