@@ -1091,15 +1091,19 @@ const ScoreLogModal = ({ gameStatus, league, onClose, onSuccess }) => {
         onSuccess();
         // Show success message
         if (result.points_earned) {
-          alert(`Eliminated in position #${finishPosition}! You earned ${result.points_earned} points and ${result.earnings >= 0 ? 'won' : 'lost'} $${Math.abs(result.earnings)}.`);
+          alert(`🎯 Eliminated in position #${finishPosition}!\n\n✅ You earned ${result.points_earned} points\n💰 ${result.earnings >= 0 ? 'Won' : 'Lost'} $${Math.abs(result.earnings)}`);
         }
       } else {
         const error = await response.json();
-        alert(error.detail);
+        alert(`❌ ${error.detail}`);
+        setLoading(false);
+        return;
       }
     } catch (error) {
       console.error('Error logging score:', error);
       alert('Error logging your score. Please try again.');
+      setLoading(false);
+      return;
     }
     setLoading(false);
   };
