@@ -740,11 +740,12 @@ const CreateLeagueModal = ({ onClose, onSuccess }) => {
   );
 };
 
-// Game Interface (updated to work with real users and results submission)
+// Game Interface with Real-time Score Logging
 const GameInterface = ({ league, onBack }) => {
   const [gameStatus, setGameStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [checkedInUsers, setCheckedInUsers] = useState(new Set());
+  const [showScoreModal, setShowScoreModal] = useState(false);
   const [showResultsForm, setShowResultsForm] = useState(false);
   const { user, token } = useAuth();
 
@@ -773,6 +774,12 @@ const GameInterface = ({ league, onBack }) => {
   };
 
   const handleCheckIn = async (action) => {
+    if (action === 'check_out' && gameStatus?.game_started && checkedInUsers.has(user.id)) {
+      // Show score modal for elimination during active game
+      setShowScoreModal(true);
+      return;
+    }
+
     try {
       const response = await fetch(`${BACKEND_URL}/api/game/${league.id}/checkin`, {
         method: 'POST',
@@ -878,6 +885,7 @@ const GameInterface = ({ league, onBack }) => {
   
   const isCheckedIn = checkedInUsers.has(user.id);
   const isAdmin = league.admin_id === user.id;
+  const isEliminated = gameStatus?.live_eliminations?.some(e => e.user_id === user.id);
 
   return (
     <div className="game-interface">
@@ -887,15 +895,15 @@ const GameInterface = ({ league, onBack }) => {
         <div className="game-stats">
           <div className="stat">
             <span className="stat-value">{gameStatus?.checked_in_players || 0}</span>
-            <span className="stat-label">Checked In</span>
+            <span className="stat-label">Active</span>
+          </div>
+          <div className="stat">
+            <span className="stat-value">{gameStatus?.eliminated_count || 0}</span>
+            <span className="stat-label">Eliminated</span>
           </div>
           <div className="stat">
             <span className="stat-value">{gameStatus?.tables_needed || 0}</span>
             <span className="stat-label">Tables</span>
-          </div>
-          <div className="stat">
-            <span className="stat-value">{gameStatus?.total_members || 0}</span>
-            <span className="stat-label">Members</span>
           </div>
         </div>
       </header>
@@ -903,26 +911,37 @@ const GameInterface = ({ league, onBack }) => {
       <div className="game-content">
         <div className="game-sidebar">
           <div className="check-in-section">
-            <h2>Game Day Check-In</h2>
+            <h2>Game Status</h2>
             
             <div className="my-checkin">
-              <div className={`my-status ${isCheckedIn ? 'checked-in' : ''}`}>
+              <div className={`my-status ${isCheckedIn ? 'checked-in' : ''} ${isEliminated ? 'eliminated' : ''}`}>
                 <span className="my-avatar">{user.avatar}</span>
                 <span className="my-name">{user.name}</span>
-                <button
-                  className={`my-checkin-btn ${isCheckedIn ? 'checked-in' : ''}`}
-                  onClick={() => handleCheckIn(isCheckedIn ? 'check_out' : 'check_in')}
-                  disabled={gameStatus?.game_started}
-                >
-                  {isCheckedIn ? '✓ Checked In' : 'Check In'}
-                </button>
+                {isEliminated ? (
+                  <span className="eliminated-badge">💀 Eliminated</span>
+                ) : (
+                  <button
+                    className={`my-checkin-btn ${isCheckedIn ? 'checked-in' : ''}`}
+                    onClick={() => handleCheckIn(isCheckedIn ? 'check_out' : 'check_in')}
+                    disabled={gameStatus?.game_started && isCheckedIn}
+                  >
+                    {isCheckedIn ? 
+                      (gameStatus?.game_started ? '✓ Playing' : '✓ Checked In') : 
+                      'Check In'
+                    }
+                  </button>
+                )}
               </div>
             </div>
 
             <div className="members-list">
-              <h3>League Members</h3>
+              <h3>Active Players</h3>
               {gameStatus?.league_members?.map(member => {
                 const memberCheckedIn = checkedInUsers.has(member.id);
+                const memberEliminated = gameStatus?.live_eliminations?.some(e => e.user_id === member.id);
+                
+                if (memberEliminated) return null; // Don't show eliminated players in active list
+                
                 return (
                   <div key={member.id} className={`member-item ${memberCheckedIn ? 'checked-in' : ''}`}>
                     <span className="member-avatar">{member.avatar}</span>
@@ -932,6 +951,31 @@ const GameInterface = ({ league, onBack }) => {
                 );
               })}
             </div>
+
+            {gameStatus?.live_eliminations && gameStatus.live_eliminations.length > 0 && (
+              <div className="eliminations-list">
+                <h3>Eliminations</h3>
+                {gameStatus.live_eliminations
+                  .sort((a, b) => a.finish_position - b.finish_position)
+                  .map(elimination => (
+                  <div key={elimination.user_id} className="elimination-item">
+                    <div className="elimination-info">
+                      <span className="elimination-avatar">{elimination.user_avatar}</span>
+                      <span className="elimination-name">{elimination.user_name}</span>
+                    </div>
+                    <div className="elimination-result">
+                      <span className={`finish-pos ${elimination.finish_position <= 3 ? 'top-three' : ''}`}>
+                        {elimination.finish_position === 1 ? '🥇' : 
+                         elimination.finish_position === 2 ? '🥈' : 
+                         elimination.finish_position === 3 ? '🥉' : 
+                         `#${elimination.finish_position}`}
+                      </span>
+                      <span className="points">+{elimination.points_earned} pts</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {isAdmin && (
@@ -966,10 +1010,10 @@ const GameInterface = ({ league, onBack }) => {
 
         <div className="tables-area">
           <div className="tables-header">
-            <h2>🎯 Seat Assignments</h2>
-            {gameStatus?.checked_in_players > 0 && (
-              <p className="assignment-info">
-                Auto-assigned {gameStatus.checked_in_players} players across {gameStatus.tables_needed} table{gameStatus.tables_needed > 1 ? 's' : ''}
+            <h2>🎯 Live Tournament</h2>
+            {gameStatus?.game_started && (
+              <p className="tournament-info">
+                {gameStatus.total_initial_players} players started • {gameStatus.checked_in_players} remaining
               </p>
             )}
           </div>
@@ -978,7 +1022,7 @@ const GameInterface = ({ league, onBack }) => {
             <div className="no-players">
               <div className="empty-state">
                 <div className="empty-icon">🃏</div>
-                <h3>No Players Checked In</h3>
+                <h3>No Active Players</h3>
                 <p>Players will be automatically assigned seats as they check in</p>
               </div>
             </div>
@@ -991,6 +1035,18 @@ const GameInterface = ({ league, onBack }) => {
           )}
         </div>
       </div>
+
+      {showScoreModal && (
+        <ScoreLogModal 
+          gameStatus={gameStatus}
+          league={league}
+          onClose={() => setShowScoreModal(false)}
+          onSuccess={() => {
+            setShowScoreModal(false);
+            fetchGameStatus();
+          }}
+        />
+      )}
 
       {showResultsForm && (
         <GameResultsModal 
@@ -1007,16 +1063,110 @@ const GameInterface = ({ league, onBack }) => {
   );
 };
 
+const ScoreLogModal = ({ gameStatus, league, onClose, onSuccess }) => {
+  const [finishPosition, setFinishPosition] = useState('');
+  const [loading, setLoading] = useState(false);
+  const { token } = useAuth();
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/game/${league.id}/checkin`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          league_id: league.id,
+          action: 'check_out',
+          finish_position: parseInt(finishPosition)
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        onSuccess();
+        // Show success message
+        if (result.points_earned) {
+          alert(`Eliminated in position #${finishPosition}! You earned ${result.points_earned} points and ${result.earnings >= 0 ? 'won' : 'lost'} $${Math.abs(result.earnings)}.`);
+        }
+      } else {
+        const error = await response.json();
+        alert(error.detail);
+      }
+    } catch (error) {
+      console.error('Error logging score:', error);
+      alert('Error logging your score. Please try again.');
+    }
+    setLoading(false);
+  };
+
+  const maxPosition = gameStatus?.total_initial_players || 1;
+  const eliminatedPositions = new Set(gameStatus?.live_eliminations?.map(e => e.finish_position) || []);
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal">
+        <div className="modal-header">
+          <h2>🎯 Log Your Score</h2>
+          <button onClick={onClose} className="close-button">✕</button>
+        </div>
+        
+        <div className="score-info">
+          <p>You've been eliminated from the tournament!</p>
+          <p>Please select your final position:</p>
+        </div>
+        
+        <form onSubmit={handleSubmit} className="score-form">
+          <div className="form-group">
+            <label>Finish Position</label>
+            <select
+              value={finishPosition}
+              onChange={(e) => setFinishPosition(e.target.value)}
+              required
+              className="position-select"
+            >
+              <option value="">Select your position...</option>
+              {Array.from({length: maxPosition}, (_, i) => i + 1)
+                .filter(pos => !eliminatedPositions.has(pos))
+                .map(pos => (
+                <option key={pos} value={pos}>
+                  {pos === 1 ? '🥇 1st Place' : 
+                   pos === 2 ? '🥈 2nd Place' : 
+                   pos === 3 ? '🥉 3rd Place' : 
+                   `#${pos}`}
+                </option>
+              ))}
+            </select>
+          </div>
+          
+          <div className="form-actions">
+            <button type="button" onClick={onClose} className="cancel-button">
+              Cancel
+            </button>
+            <button type="submit" disabled={loading || !finishPosition} className="submit-button">
+              {loading ? 'Submitting...' : 'Log Score'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
 const GameResultsModal = ({ gameStatus, league, onClose, onSuccess }) => {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const { token } = useAuth();
 
   useEffect(() => {
-    // Initialize results with checked-in players
-    const initialResults = gameStatus.seat_assignments.map((assignment, index) => ({
-      user_id: assignment.user_id,
-      user_name: assignment.user_name,
+    // Initialize results with all initial players
+    const initialResults = gameStatus.league_members.map((member, index) => ({
+      user_id: member.id,
+      user_name: member.name,
       finish_position: index + 1,
       points_earned: 0,
       buy_in_paid: league.buy_in
@@ -1083,12 +1233,12 @@ const GameResultsModal = ({ gameStatus, league, onClose, onSuccess }) => {
     <div className="modal-overlay">
       <div className="modal large-modal">
         <div className="modal-header">
-          <h2>🏁 Game Results</h2>
+          <h2>🏁 Final Game Results</h2>
           <button onClick={onClose} className="close-button">✕</button>
         </div>
         
         <form onSubmit={handleSubmit} className="results-form">
-          <p>Set the finish positions for each player:</p>
+          <p>Set the final positions for all players (this will override live eliminations):</p>
           
           <div className="results-list">
             {results.map((result, index) => (
