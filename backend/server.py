@@ -652,6 +652,18 @@ async def handle_checkin(league_id: str, request: CheckInRequest, current_user: 
         if current_game.get("game_started", False) and request.finish_position:
             # Check out with score during active game (elimination)
             if current_user["id"] in checked_in_users and current_user["id"] not in eliminated_users:
+                
+                # Check if this finish position is already taken
+                existing_result = await game_results_collection.find_one({
+                    "game_id": current_game["id"],
+                    "finish_position": request.finish_position
+                })
+                if existing_result:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Position #{request.finish_position} is already taken by {existing_result['user_name']}"
+                    )
+                
                 eliminated_users.append(current_user["id"])
                 
                 # Get total players count
