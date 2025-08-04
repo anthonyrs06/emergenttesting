@@ -921,13 +921,13 @@ const GameInterface = ({ league, onBack }) => {
                   <span className="eliminated-badge">💀 Eliminated</span>
                 ) : (
                   <button
-                    className={`my-checkin-btn ${isCheckedIn ? 'checked-in' : ''}`}
+                    className={`my-checkin-btn ${isCheckedIn ? 'checked-in' : ''} ${gameStatus?.game_started && isCheckedIn ? 'elimination-btn' : ''}`}
                     onClick={() => handleCheckIn(isCheckedIn ? 'check_out' : 'check_in')}
-                    disabled={gameStatus?.game_started && isCheckedIn}
+                    disabled={false}
                   >
-                    {isCheckedIn ? 
-                      (gameStatus?.game_started ? '✓ Playing' : '✓ Checked In') : 
-                      'Check In'
+                    {!isCheckedIn ? 'Check In' :
+                     !gameStatus?.game_started ? '✓ Checked In' :
+                     '💀 Get Eliminated'
                     }
                   </button>
                 )}
