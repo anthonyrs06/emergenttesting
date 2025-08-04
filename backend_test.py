@@ -210,15 +210,18 @@ class PokerLeagueAPITester:
             print(f"Tables needed: {response.get('tables_needed', 0)}")
         return success, response
 
-    def test_player_checkin(self, league_id, action="check_in"):
-        """Test checking in a player"""
+    def test_player_checkin(self, league_id, action="check_in", finish_position=None):
+        """Test checking in a player or checking out with score"""
         data = {
             "league_id": league_id,
             "action": action
         }
         
+        if finish_position is not None:
+            data["finish_position"] = finish_position
+        
         success, response = self.run_test(
-            f"Player {action}",
+            f"Player {action}" + (f" with position {finish_position}" if finish_position else ""),
             "POST",
             f"api/game/{league_id}/checkin",
             200,
@@ -229,6 +232,9 @@ class PokerLeagueAPITester:
         if success:
             print(f"Player {action}: {response.get('message', '')}")
             print(f"Total checked in: {response.get('checked_in_count', 0)}")
+            if finish_position and response.get('points_earned'):
+                print(f"Points earned: {response.get('points_earned')}")
+                print(f"Earnings: ${response.get('earnings')}")
         return success, response
 
     def test_start_game(self, league_id):
