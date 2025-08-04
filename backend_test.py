@@ -337,6 +337,289 @@ class PokerLeagueAPITester:
         return success, response
 
     # Complete Flow Test
+    def test_real_time_score_logging_flow(self):
+        """Test the NEW Real-Time Score Logging feature"""
+        print("\n=== TESTING REAL-TIME SCORE LOGGING FLOW ===")
+        
+        # 1. Register admin user
+        admin_success, admin = self.test_register_user()
+        if not admin_success:
+            print("❌ Failed to register admin user")
+            return False
+        
+        admin_id = admin.get('id')
+        admin_email = admin.get('email')
+        
+        # 2. Create a league
+        league_success, league_id = self.test_create_league(buy_in=100)
+        if not league_success or not league_id:
+            print("❌ Failed to create league")
+            return False
+        
+        self.test_league = league_id
+        
+        # 3. Register 4 more test users (5 total players)
+        test_users = []
+        for i in range(4):
+            # Save admin token
+            admin_token = self.token
+            
+            # Register new user
+            user_success, user = self.test_register_user()
+            if user_success and user:
+                test_users.append(user)
+                
+                # Join the league with this user
+                join_success, _ = self.test_join_league(league_id)
+                if not join_success:
+                    print(f"❌ Failed to join league for user {user.get('name')}")
+            
+            # Restore admin token
+            self.token = admin_token
+            self.user = admin
+        
+        self.test_users = test_users
+        
+        if len(test_users) < 4:
+            print("❌ Failed to create enough test users")
+            return False
+        
+        print(f"✅ Created {len(test_users)} test users who joined the league")
+        
+        # 4. Get initial game status
+        _, game_status = self.test_get_game_status(league_id)
+        if not game_status:
+            print("❌ Failed to get initial game status")
+            return False
+            
+        print("✅ Game initialized successfully")
+        
+        # 5. Check-in all users (admin + test users)
+        all_players = [admin] + test_users
+        for user in all_players:
+            # Login as this user
+            login_success, _ = self.test_login_user(user.get('email'))
+            if login_success:
+                # Check in
+                checkin_success, _ = self.test_player_checkin(league_id)
+                if not checkin_success:
+                    print(f"❌ Failed to check in user {user.get('name')}")
+                else:
+                    print(f"✅ Checked in user {user.get('name')}")
+        
+        # 6. Login as admin and start the game
+        login_success, _ = self.test_login_user(admin_email)
+        if not login_success:
+            print("❌ Failed to log back in as admin")
+            return False
+        
+        # Get game status to verify check-ins
+        _, game_status = self.test_get_game_status(league_id)
+        checked_in = game_status.get('checked_in_players', 0)
+        print(f"✅ {checked_in} players checked in")
+        
+        # Start the game
+        start_success, _ = self.test_start_game(league_id)
+        if not start_success:
+            print("❌ Failed to start the game")
+            return False
+        
+        print("✅ Game started successfully")
+        
+        # 7. TEST REAL-TIME ELIMINATIONS - Players get eliminated one by one
+        print("\n--- TESTING REAL-TIME ELIMINATIONS ---")
+        
+        # Player 1 gets eliminated in 5th place (last place)
+        login_success, _ = self.test_login_user(test_users[0].get('email'))
+        if login_success:
+            elimination_success, elimination_response = self.test_player_checkin(
+                league_id, action="check_out", finish_position=5
+            )
+            if elimination_success:
+                print(f"✅ Player 1 eliminated in 5th place")
+                print(f"   Points earned: {elimination_response.get('points_earned', 0)}")
+                print(f"   Earnings: ${elimination_response.get('earnings', 0)}")
+            else:
+                print("❌ Failed to eliminate player 1")
+                return False
+        
+        # Player 2 gets eliminated in 4th place
+        login_success, _ = self.test_login_user(test_users[1].get('email'))
+        if login_success:
+            elimination_success, elimination_response = self.test_player_checkin(
+                league_id, action="check_out", finish_position=4
+            )
+            if elimination_success:
+                print(f"✅ Player 2 eliminated in 4th place")
+                print(f"   Points earned: {elimination_response.get('points_earned', 0)}")
+                print(f"   Earnings: ${elimination_response.get('earnings', 0)}")
+            else:
+                print("❌ Failed to eliminate player 2")
+                return False
+        
+        # Player 3 gets eliminated in 3rd place
+        login_success, _ = self.test_login_user(test_users[2].get('email'))
+        if login_success:
+            elimination_success, elimination_response = self.test_player_checkin(
+                league_id, action="check_out", finish_position=3
+            )
+            if elimination_success:
+                print(f"✅ Player 3 eliminated in 3rd place")
+                print(f"   Points earned: {elimination_response.get('points_earned', 0)}")
+                print(f"   Earnings: ${elimination_response.get('earnings', 0)}")
+            else:
+                print("❌ Failed to eliminate player 3")
+                return False
+        
+        # Player 4 gets eliminated in 2nd place
+        login_success, _ = self.test_login_user(test_users[3].get('email'))
+        if login_success:
+            elimination_success, elimination_response = self.test_player_checkin(
+                league_id, action="check_out", finish_position=2
+            )
+            if elimination_success:
+                print(f"✅ Player 4 eliminated in 2nd place")
+                print(f"   Points earned: {elimination_response.get('points_earned', 0)}")
+                print(f"   Earnings: ${elimination_response.get('earnings', 0)}")
+            else:
+                print("❌ Failed to eliminate player 4")
+                return False
+        
+        # Admin wins (1st place) - eliminate themselves
+        login_success, _ = self.test_login_user(admin_email)
+        if login_success:
+            elimination_success, elimination_response = self.test_player_checkin(
+                league_id, action="check_out", finish_position=1
+            )
+            if elimination_success:
+                print(f"✅ Admin wins in 1st place")
+                print(f"   Points earned: {elimination_response.get('points_earned', 0)}")
+                print(f"   Earnings: ${elimination_response.get('earnings', 0)}")
+            else:
+                print("❌ Failed to eliminate admin (winner)")
+                return False
+        
+        # 8. Check game status to verify live eliminations
+        print("\n--- VERIFYING LIVE ELIMINATIONS ---")
+        _, final_game_status = self.test_get_game_status(league_id)
+        if final_game_status:
+            live_eliminations = final_game_status.get('live_eliminations', [])
+            print(f"✅ Found {len(live_eliminations)} live eliminations")
+            
+            # Verify all positions are recorded
+            positions = [e.get('finish_position') for e in live_eliminations]
+            expected_positions = [1, 2, 3, 4, 5]
+            
+            if sorted(positions) == expected_positions:
+                print("✅ All finish positions recorded correctly")
+            else:
+                print(f"❌ Expected positions {expected_positions}, got {sorted(positions)}")
+                return False
+            
+            # Verify points calculation
+            for elimination in live_eliminations:
+                pos = elimination.get('finish_position')
+                points = elimination.get('points_earned')
+                print(f"   Position {pos}: {elimination.get('user_name')} - {points} points")
+                
+                # Verify points match expected calculation
+                expected_points = 100 if pos == 1 else 80 if pos == 2 else 60 if pos == 3 else 40 if pos <= 5 else 20
+                if points != expected_points:
+                    print(f"❌ Expected {expected_points} points for position {pos}, got {points}")
+                    return False
+            
+            print("✅ All points calculated correctly")
+            
+            # Verify eliminated count
+            eliminated_count = final_game_status.get('eliminated_count', 0)
+            if eliminated_count == 5:
+                print("✅ Eliminated count is correct")
+            else:
+                print(f"❌ Expected 5 eliminated players, got {eliminated_count}")
+                return False
+            
+            # Verify active players count (should be 0 now)
+            active_count = final_game_status.get('checked_in_players', 0)
+            if active_count == 0:
+                print("✅ No active players remaining")
+            else:
+                print(f"❌ Expected 0 active players, got {active_count}")
+                return False
+        
+        # 9. Check leaderboard to verify real-time updates
+        print("\n--- VERIFYING LEADERBOARD UPDATES ---")
+        leaderboard_success, leaderboard = self.test_get_league_leaderboard(league_id)
+        if not leaderboard_success:
+            print("❌ Failed to get league leaderboard")
+            return False
+        
+        if len(leaderboard) != 5:
+            print(f"❌ Expected 5 players on leaderboard, got {len(leaderboard)}")
+            return False
+        else:
+            print(f"✅ Leaderboard has correct number of players: {len(leaderboard)}")
+        
+        # Verify winner is at top
+        winner = leaderboard[0]
+        if winner.get('user_name') == admin.get('name'):
+            print(f"✅ Winner {winner.get('user_name')} is at top of leaderboard")
+            print(f"   Points: {winner.get('total_points')}")
+            print(f"   Earnings: ${winner.get('total_earnings')}")
+        else:
+            print(f"❌ Expected {admin.get('name')} at top, got {winner.get('user_name')}")
+            return False
+        
+        # 10. Test error handling - try to use duplicate position
+        print("\n--- TESTING ERROR HANDLING ---")
+        
+        # Reset game first
+        reset_success, _ = self.test_reset_game(league_id)
+        if not reset_success:
+            print("❌ Failed to reset game for error testing")
+            return False
+        
+        # Check in 2 players and start game
+        for user in [admin, test_users[0]]:
+            login_success, _ = self.test_login_user(user.get('email'))
+            if login_success:
+                self.test_player_checkin(league_id)
+        
+        # Start game as admin
+        login_success, _ = self.test_login_user(admin_email)
+        if login_success:
+            self.test_start_game(league_id)
+        
+        # First player eliminates in 2nd place
+        login_success, _ = self.test_login_user(test_users[0].get('email'))
+        if login_success:
+            self.test_player_checkin(league_id, action="check_out", finish_position=2)
+        
+        # Try to eliminate admin in same position (should fail)
+        login_success, _ = self.test_login_user(admin_email)
+        if login_success:
+            # This should fail because position 2 is already taken
+            duplicate_success, _ = self.run_test(
+                "Duplicate Position Test (should fail)",
+                "POST",
+                f"api/game/{league_id}/checkin",
+                400,  # Expecting error
+                data={
+                    "league_id": league_id,
+                    "action": "check_out",
+                    "finish_position": 2
+                },
+                auth=True
+            )
+            
+            if duplicate_success:
+                print("✅ Duplicate position correctly rejected")
+            else:
+                print("❌ Duplicate position should have been rejected")
+        
+        print("✅ Real-time score logging flow test completed successfully!")
+        return True
+
+    # Complete Flow Test
     def test_complete_tournament_flow(self):
         """Test the complete tournament flow from registration to leaderboard"""
         print("\n=== TESTING COMPLETE TOURNAMENT FLOW ===")
